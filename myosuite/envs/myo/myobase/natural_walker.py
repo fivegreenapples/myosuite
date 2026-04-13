@@ -1,9 +1,8 @@
 """=================================================
 # Copyright (c) Ben Holland
 Authors  :: Ben Holland (ben@fivegreenapples.com)
-================================================="""
+=================================================
 
-"""
 Implementation of the Walker environment using the reward function developed in
 Schumacher et al. 2025
 Emergence of natural and robust bipedal walking by learning from biologically plausible objectives
@@ -18,8 +17,7 @@ import os
 
 import numpy as np
 
-from myosuite.envs.myo.myobase import register_env_with_variants
-from myosuite.envs.myo.myobase.walk_v0 import WalkEnvV0
+from .walk_v0 import WalkEnvV0
 
 
 class NaturalAndRobustWalker(WalkEnvV0):

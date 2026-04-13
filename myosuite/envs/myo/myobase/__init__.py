@@ -3,15 +3,16 @@
 Authors  :: Vikash Kumar (vikashplus@gmail.com), Vittorio Caggiano (caggiano@gmail.com)
 ================================================="""
 
-from myosuite.utils import gym
-
-register = gym.register
 import os
 
 import numpy as np
 
 from myosuite.envs.env_variants import register_env_variant
-from myosuite.envs.myo.myobase.natural_walker import NaturalAndRobustWalker
+from myosuite.utils import gym
+
+from .natural_walker import NaturalAndRobustWalker
+
+register = gym.register
 
 
 # utility to register envs with all muscle conditions
