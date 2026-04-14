@@ -32,6 +32,16 @@ class NaturalAndRobustWalker(WalkEnvV0):
         "joint_limit": -0.1307,
     }
 
+    def _setup(
+        self,
+        weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
+        **kwargs,
+    ):
+        super()._setup(
+            weighted_reward_keys=weighted_reward_keys,
+            **kwargs,
+        )
+
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)

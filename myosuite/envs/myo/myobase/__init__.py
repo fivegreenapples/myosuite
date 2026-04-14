@@ -10,8 +10,6 @@ import numpy as np
 from myosuite.envs.env_variants import register_env_variant
 from myosuite.utils import gym
 
-from .natural_walker import NaturalAndRobustWalker
-
 register = gym.register
 
 
@@ -539,7 +537,6 @@ register_env_with_variants(
         "target_x_vel": 0.0,  # desired x velocity in m/s
         "target_y_vel": 1.2,  # desired y velocity in m/s
         "target_rot": None,  # if None then the initial root pos will be taken, otherwise provide quat
-        "weighted_reward_keys": NaturalAndRobustWalker.DEFAULT_RWD_KEYS_AND_WEIGHTS,
     },
 )
 
