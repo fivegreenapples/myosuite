@@ -13,8 +13,8 @@ https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
 """
 
 import collections
-import os
 
+import mujoco
 import numpy as np
 
 from .walk_v0 import WalkEnvV0
@@ -132,6 +132,30 @@ class NaturalAndRobustWalker(WalkEnvV0):
         )
 
         return sum_hinge_torques / num_hinge_joints
+
+    def _self_contact_cost(self):
+        # Sum of all contact force magnitudes between bodies in the model.
+        total_force = 0.0
+        floor_geom_id = self.sim.model.geom_name2id("floor")
+
+        for i in range(self.sim.data.ncon):
+            contact = self.sim.data.contact[i]
+            geom1 = contact.geom[0]
+            geom2 = contact.geom[1]
+
+            # Skip contacts involving the floor geom
+            if geom1 == floor_geom_id or geom2 == floor_geom_id:
+                continue
+
+            dims = contact.dim
+            efc_start = contact.efc_address
+            force = self.sim.data.efc_force[efc_start : efc_start + dims]
+            print(i, force)
+
+            # # Use just the normal + tangential force magnitude
+            # total_force += np.linalg.norm(force[:3])
+
+        return total_force
 
     def get_reward_dict(self, obs_dict):
         vel_reward = self._get_vel_reward()
