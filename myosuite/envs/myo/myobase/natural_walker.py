@@ -13,8 +13,8 @@ https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
 """
 
 import collections
-import os
 
+import mujoco
 import numpy as np
 
 from .walk_v0 import WalkEnvV0
@@ -45,6 +45,10 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)
+
+    def _y_vel(self):
+        _, y_vel = self._get_com_velocity()
+        return y_vel
 
     def _gaussian_plateau_vel(self):
         _, y_vel = self._get_com_velocity()
@@ -129,17 +133,48 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         return sum_hinge_torques / num_hinge_joints
 
+    def _self_contact_cost(self):
+        # Sum of all contact force magnitudes between bodies in the model.
+        total_force = 0.0
+        floor_geom_id = self.sim.model.geom_name2id("floor")
+
+        for i in range(self.sim.data.ncon):
+            contact = self.sim.data.contact[i]
+            geom1 = contact.geom[0]
+            geom2 = contact.geom[1]
+
+            # Skip contacts involving the ground
+            if geom1 == floor_geom_id or geom2 == floor_geom_id:
+                continue
+
+            # Only worry about the normal force which will be the first force in the list
+            # i.e. don't worry about the number of dimensions (contact.dim)
+            # Take the absolute value
+            force = abs(self.sim.data.efc_force[contact.efc_address])
+
+            total_force += force
+
+        # Now clip to 100 and normalize by 100 so we're in the range [0,1]
+        # From the paper this means "only strong and potentially painful self-contacts
+        # are considered, while weaker collisions can be safely ignored by the learner."
+        total_force = min(total_force, 100)
+        total_force /= 100
+
+        return total_force
+
     def get_reward_dict(self, obs_dict):
         vel_reward = self._get_vel_reward()
 
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
+                ("y_vel", self._y_vel()),
                 ("gaussian_vel", self._gaussian_plateau_vel()),
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
                 ("joint_limit", self._joint_limit_torques()),
+                ("self_contact_cost", self._self_contact_cost()),
                 # Must keys
                 ("sparse", vel_reward),
                 ("solved", vel_reward >= 1.0),
