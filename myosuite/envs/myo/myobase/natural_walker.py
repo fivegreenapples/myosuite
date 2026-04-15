@@ -46,6 +46,10 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)
 
+    def _y_vel(self):
+        _, y_vel = self._get_com_velocity()
+        return y_vel
+
     def _gaussian_plateau_vel(self):
         _, y_vel = self._get_com_velocity()
 
@@ -135,6 +139,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
+                ("y_vel", self._y_vel()),
                 ("gaussian_vel", self._gaussian_plateau_vel()),
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
