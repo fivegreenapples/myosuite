@@ -169,6 +169,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
                 ("joint_limit", self._joint_limit_torques()),
+                ("self_contact_cost", self._self_contact_cost()),
                 # Must keys
                 ("sparse", vel_reward),
                 ("solved", vel_reward >= 1.0),
