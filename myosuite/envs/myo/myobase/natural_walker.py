@@ -25,11 +25,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # These weights are taken from the sconegym implementation.
         # All but gaussian_vel are mentioned in the paper and do indeed match sconegym.
         # Interestingly, they are rounded to lower s.f. in the paper.
+        "y_vel": 0,
         "gaussian_vel": 10,
         "grf": -0.07281,
         "smooth_exc": -0.097,
         "number_muscles": -1.57929,
         "joint_limit": -0.1307,
+        "self_contact": 0,
     }
 
     def _setup(
@@ -174,7 +176,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
                 ("joint_limit", self._joint_limit_torques()),
-                ("self_contact_cost", self._self_contact_cost()),
+                ("self_contact", self._self_contact_cost()),
                 # Must keys
                 ("sparse", vel_reward),
                 ("solved", vel_reward >= 1.0),
