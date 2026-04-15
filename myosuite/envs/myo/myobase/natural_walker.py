@@ -143,17 +143,22 @@ class NaturalAndRobustWalker(WalkEnvV0):
             geom1 = contact.geom[0]
             geom2 = contact.geom[1]
 
-            # Skip contacts involving the floor geom
+            # Skip contacts involving the ground
             if geom1 == floor_geom_id or geom2 == floor_geom_id:
                 continue
 
-            dims = contact.dim
-            efc_start = contact.efc_address
-            force = self.sim.data.efc_force[efc_start : efc_start + dims]
-            print(i, force)
+            # Only worry about the normal force which will be the first force in the list
+            # i.e. don't worry about the number of dimensions (contact.dim)
+            # Take the absolute value
+            force = abs(self.sim.data.efc_force[contact.efc_address])
 
-            # # Use just the normal + tangential force magnitude
-            # total_force += np.linalg.norm(force[:3])
+            total_force += force
+
+        # Now clip to 100 and normalize by 100 so we're in the range [0,1]
+        # From the paper this means "only strong and potentially painful self-contacts
+        # are considered, while weaker collisions can be safely ignored by the learner."
+        total_force = min(total_force, 100)
+        total_force /= 100
 
         return total_force
 
