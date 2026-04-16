@@ -165,8 +165,6 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return total_force
 
     def get_reward_dict(self, obs_dict):
-        vel_reward = self._get_vel_reward()
-
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
@@ -178,8 +176,8 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 ("joint_limit", self._joint_limit_torques()),
                 ("self_contact", self._self_contact_cost()),
                 # Must keys
-                ("sparse", vel_reward),
-                ("solved", vel_reward >= 1.0),
+                ("sparse", 1),
+                ("solved", False),
                 ("done", self._get_done()),
             )
         )
