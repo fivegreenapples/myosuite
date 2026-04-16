@@ -25,13 +25,27 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # These weights are taken from the sconegym implementation.
         # All but gaussian_vel are mentioned in the paper and do indeed match sconegym.
         # Interestingly, they are rounded to lower s.f. in the paper.
-        "y_vel": 0,
         "gaussian_vel": 10,
         "grf": -0.07281,
         "smooth_exc": -0.097,
         "number_muscles": -1.57929,
         "joint_limit": -0.1307,
+        # y_vel is not mentioned in scone implementation but used here in the max speed
+        # running roll outs, and set to 1 to have reward == y_vel
+        "y_vel": 0,
+        # self_contact is not used in walking but used in max speed running. weight is
+        # -10 from paper and sconegym.
         "self_contact": 0,
+        ##
+        ##
+        ## Further terms have been added for reward shaping beyond what's in the paper
+        ##
+        # gaussian_plateau_y_vel is just a more descriptive name for the above gaussian_vel
+        "gaussian_plateau_y_vel": 0,
+        # gaussian_x_vel is a true symmetric (non-plateau) gaussian for targetting zero x_vel
+        "gaussian_x_vel": 0,
+        # x_drift is a cost term to penalise moving away from the running centerline
+        "x_drift": 0,
     }
 
     def _setup(
@@ -47,6 +61,9 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)
+
+    def _gaussian_vel(self, v, target):
+        return np.exp(-np.square(v - target))
 
     def _gaussian_plateau_vel(self, v, target):
         if v < target:
@@ -159,13 +176,21 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return total_force
 
     def get_reward_dict(self, obs_dict):
-        _, y_vel = self._get_com_velocity()
+        x_pos, _, _ = self._get_com()
+        x_vel, y_vel = self._get_com_velocity()
+
+        gaussian_plateau_y_vel = self._gaussian_plateau_vel(y_vel, self.target_y_vel)
 
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
+                ("x_drift", abs(x_pos)),
                 ("y_vel", y_vel),
-                ("gaussian_vel", self._gaussian_plateau_vel(y_vel, self.target_y_vel)),
+                # don't use target_x_vel as this term is only intended to avoid sideways drift
+                ("gaussian_x_vel", self._gaussian_vel(x_vel, 0)),
+                # provide gaussian_plateau_y_vel for more descriptive label, and gaussian_vel for bw compat
+                ("gaussian_plateau_y_vel", gaussian_plateau_y_vel),
+                ("gaussian_vel", gaussian_plateau_y_vel),
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
