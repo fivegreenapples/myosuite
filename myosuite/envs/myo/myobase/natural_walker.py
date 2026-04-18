@@ -46,6 +46,15 @@ class NaturalAndRobustWalker(WalkEnvV0):
         "gaussian_x_vel": 0,
         # x_drift is a cost term to penalise moving away from the running centerline
         "x_drift": 0,
+        # rewards being at the target y position which is based on target velociyy and number of steps covered.
+        # aims to ensure speed is maintained rather than slowly slipping being
+        "gaussian_y_pos": 0,
+        # like gaussian_plateau_y_vel but stretches the gaussian so the gradient is not flat at v==0 when target is high (e.g. > 2.5)
+        # aims to better support targetting specific running speeds.
+        "stretched_gaussian_plateau_y_vel": 0,
+        # linear reward up to the target velocity and 1 thereafter.
+        # simpler version of above. just simpler without the smooth gradients of a gaussian
+        "plateau_y_vel": 0,
     }
 
     def _setup(
@@ -77,9 +86,19 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
     def _plateau_pos(self, p, target, allowance):
         # calculates a distance away from target allowing for a "safe zone"
-        # `allowance`` is the distance either side of target that gets zero cost.
+        # `allowance` is the distance either side of target that gets zero cost.
         # i.e. p is allowed to be target +/- allowance
         return max(0, abs(p - target) - allowance)
+
+    def _gaussian_pos(self, p, target, breadth):
+        # calculates a gaussian around the target position
+        # breadth controls how wide the curve is and hence how severe the drop off either side
+        return np.exp(-np.square((p - target) / breadth))
+
+    def _plateau_vel(self, v, target):
+        if target > 0 and v < target:
+            return v / target
+        return 1.0
 
     def _gaussian_vel(self, v, target):
         return np.exp(-np.square(v - target))
@@ -87,7 +106,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def _gaussian_plateau_vel(self, v, target):
         if v < target:
             return np.exp(-np.square(v - target))
+        return 1.0
 
+    def _stretched_gaussian_plateau_vel(self, v, target):
+        # The stretching ensures there is a reasonable gradient from v==0 up to the target
+        # Without it, the gaussian is more or less flat around v==0 when the target is >2.5
+        if v < target:
+            return np.exp(-np.square(2 * ((v / target) - 1)))
         return 1.0
 
     def _grf(self):
@@ -189,8 +214,14 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return total_force
 
     def get_reward_dict(self, obs_dict):
-        x_pos, _, _ = self._get_com()
+        x_pos, y_pos, _ = self._get_com()
         x_vel, y_vel = self._get_com_velocity()
+
+        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
+        # timestep = 0.001s - from XML
+        # dt = 0.01s (time per step)
+        SECONDS_PER_STEP = 0.01
+        target_y_pos = self.target_y_vel * self.steps * SECONDS_PER_STEP
 
         gaussian_plateau_y_vel = self._gaussian_plateau_vel(y_vel, self.target_y_vel)
 
@@ -198,12 +229,18 @@ class NaturalAndRobustWalker(WalkEnvV0):
             (
                 # Optional Keys
                 ("x_drift", self._plateau_pos(x_pos, 0, self._x_drift_plateau)),
+                ("gaussian_y_pos", self._gaussian_pos(y_pos, target_y_pos, 5)),
                 ("y_vel", y_vel),
+                ("plateau_y_vel", self._plateau_vel(y_vel, self.target_y_vel)),
                 # don't use target_x_vel as this term is only intended to avoid sideways drift
                 ("gaussian_x_vel", self._gaussian_vel(x_vel, 0)),
                 # provide gaussian_plateau_y_vel for more descriptive label, and gaussian_vel for bw compat
                 ("gaussian_plateau_y_vel", gaussian_plateau_y_vel),
                 ("gaussian_vel", gaussian_plateau_y_vel),
+                (
+                    "stretched_gaussian_plateau_y_vel",
+                    self._stretched_gaussian_plateau_vel(y_vel, self.target_y_vel),
+                ),
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
