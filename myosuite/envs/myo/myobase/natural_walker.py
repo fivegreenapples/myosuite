@@ -187,6 +187,28 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         assert len(self._y_vel_curriculum) == MAX_STEPS
 
+        # And now generate y_pos curriculum based on velocity curriculum
+        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
+        # timestep = 0.001s - from XML
+        # dt = 0.01s (time per step)
+        SECONDS_PER_STEP = 0.01
+
+        self._y_pos_curriculum = [0] * MAX_STEPS
+        for idx in range(1, len(self._y_pos_curriculum)):
+            prev_dist = self._y_pos_curriculum[idx - 1]
+            vel_for_step = self.y_vel_curriculum[idx - 1]
+            self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
+
+        # Initialise targets from curriculums.
+        self.target_y_vel = self._y_vel_curriculum[idx]
+        self.target_y_pos = self._y_pos_curriculum[idx]
+
+        if self._print_debug:
+            print(
+                f"Target y vel: {self.target_y_vel:.2f} m/s"
+                f" ({self.target_y_vel*3.6:.1f} kph)"
+            )
+
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
 
@@ -194,6 +216,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # also created for standard constant target velocity for simplicity)
         _prev_vel = self.target_y_vel
         self.target_y_vel = self._y_vel_curriculum[self.steps]
+        self.target_y_pos = self._y_pos_curriculum[self.steps]
 
         if self._print_debug and _prev_vel != self.target_y_vel:
             print(
@@ -336,19 +359,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
         x_pos, y_pos, _ = self._get_com()
         x_vel, y_vel = self._get_com_velocity()
 
-        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
-        # timestep = 0.001s - from XML
-        # dt = 0.01s (time per step)
-        SECONDS_PER_STEP = 0.01
-        target_y_pos = self.target_y_vel * self.steps * SECONDS_PER_STEP
-
         gaussian_plateau_y_vel = self._gaussian_plateau_vel(y_vel, self.target_y_vel)
 
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
                 ("x_drift", self._plateau_pos(x_pos, 0, self._x_drift_plateau)),
-                ("gaussian_y_pos", self._gaussian_pos(y_pos, target_y_pos, 5)),
+                ("gaussian_y_pos", self._gaussian_pos(y_pos, self.target_y_pos, 5)),
                 ("y_vel", y_vel),
                 ("plateau_y_vel", self._plateau_vel(y_vel, self.target_y_vel)),
                 # don't use target_x_vel as this term is only intended to avoid sideways drift
@@ -398,6 +415,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     [
                         self.target_y_vel,  # the actual target
                         y_vel - self.target_y_vel,  # difference from target
+                    ]
+                )
+                # Also supply the difference from target y position
+                _, y_pos, _ = self._get_com()
+                new_obs["target_pos"] = np.array(
+                    [
+                        y_pos - self.target_y_pos,  # difference from target
                     ]
                 )
             new_obs[k] = obs_dict[k]
