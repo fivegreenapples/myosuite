@@ -51,6 +51,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def _setup(
         self,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
+        x_drift_plateau: float = 0.0,
         **kwargs,
     ):
         # pre calculate model weight for grf cost
@@ -62,6 +63,9 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # set floor geom id for self_contact cost
         self._floor_geom_id = self.sim.model.geom_name2id("floor")
 
+        # used for x_drift cost term
+        self._x_drift_plateau = x_drift_plateau
+
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
             **kwargs,
@@ -70,6 +74,12 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)
+
+    def _plateau_pos(self, p, target, allowance):
+        # calculates a distance away from target allowing for a "safe zone"
+        # `allowance`` is the distance either side of target that gets zero cost.
+        # i.e. p is allowed to be target +/- allowance
+        return max(0, abs(p - target) - allowance)
 
     def _gaussian_vel(self, v, target):
         return np.exp(-np.square(v - target))
@@ -187,7 +197,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
-                ("x_drift", abs(x_pos)),
+                ("x_drift", self._plateau_pos(x_pos, 0, self._x_drift_plateau)),
                 ("y_vel", y_vel),
                 # don't use target_x_vel as this term is only intended to avoid sideways drift
                 ("gaussian_x_vel", self._gaussian_vel(x_vel, 0)),
