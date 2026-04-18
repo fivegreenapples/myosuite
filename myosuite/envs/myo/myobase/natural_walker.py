@@ -25,20 +25,47 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # These weights are taken from the sconegym implementation.
         # All but gaussian_vel are mentioned in the paper and do indeed match sconegym.
         # Interestingly, they are rounded to lower s.f. in the paper.
-        "y_vel": 0,
         "gaussian_vel": 10,
         "grf": -0.07281,
         "smooth_exc": -0.097,
         "number_muscles": -1.57929,
         "joint_limit": -0.1307,
+        # y_vel is not mentioned in scone implementation but used here in the max speed
+        # running roll outs, and set to 1 to have reward == y_vel
+        "y_vel": 0,
+        # self_contact is not used in walking but used in max speed running. weight is
+        # -10 from paper and sconegym.
         "self_contact": 0,
+        ##
+        ##
+        ## Further terms have been added for reward shaping beyond what's in the paper
+        ##
+        # gaussian_plateau_y_vel is just a more descriptive name for the above gaussian_vel
+        "gaussian_plateau_y_vel": 0,
+        # gaussian_x_vel is a true symmetric (non-plateau) gaussian for targetting zero x_vel
+        "gaussian_x_vel": 0,
+        # x_drift is a cost term to penalise moving away from the running centerline
+        "x_drift": 0,
     }
 
     def _setup(
         self,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
+        x_drift_plateau: float = 0.0,
         **kwargs,
     ):
+        # pre calculate model weight for grf cost
+        self._model_weight = 9.8 * sum(self.sim.model.body_mass)
+        # pre calculate number of hinge joints for joint_limit cost
+        self._num_hinge_joints = np.count_nonzero(
+            self.sim.model.jnt_type == self.sim.lib.mjtJoint.mjJNT_HINGE
+        )
+        # set floor geom id for self_contact cost
+        self._floor_geom_id = self.sim.model.geom_name2id("floor")
+
+        # used for x_drift cost term
+        self._x_drift_plateau = x_drift_plateau
+
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
             **kwargs,
@@ -48,15 +75,18 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self._prev_ctrl = self.sim.data.ctrl.copy()
         return super().step(*args, **kwargs)
 
-    def _y_vel(self):
-        _, y_vel = self._get_com_velocity()
-        return y_vel
+    def _plateau_pos(self, p, target, allowance):
+        # calculates a distance away from target allowing for a "safe zone"
+        # `allowance`` is the distance either side of target that gets zero cost.
+        # i.e. p is allowed to be target +/- allowance
+        return max(0, abs(p - target) - allowance)
 
-    def _gaussian_plateau_vel(self):
-        _, y_vel = self._get_com_velocity()
+    def _gaussian_vel(self, v, target):
+        return np.exp(-np.square(v - target))
 
-        if y_vel < self.target_y_vel:
-            return np.exp(-np.square(y_vel - self.target_y_vel))
+    def _gaussian_plateau_vel(self, v, target):
+        if v < target:
+            return np.exp(-np.square(v - target))
 
         return 1.0
 
@@ -69,14 +99,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
             self.sim.data.sensor("l_foot").data[0]
             + self.sim.data.sensor("l_toes").data[0]
         )
-        weight = 9.8 * sum(self.sim.model.body_mass)
         # The feet and toe sensors are <touch> sensors which return a single scalar value
         # for surface forces acting through the touch "site" along a normal to the
         # contacting surface. At least I think that's what they do.
         # Either way, the values are in Newtons. We normalized this against the weight
         # so the normalized_grf is in units of body weight "BW" (this mirrors how Scone
         # returns contact_load)
-        normalized_grf = (r_grf + l_grf) / weight
+        normalized_grf = (r_grf + l_grf) / self._model_weight
         # and then return this value clipped below 1.2 - a magic number from the original
         # paper which serves to avoid any penalty for grfs which would occur in normal
         # walking.
@@ -129,16 +158,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # joints. Which, I think in MuJoCo land means divide by the number of hinge
         # joints as each hinge in MuJoCo only has one axis (in Scone it looks like a
         # single joint incorporates all 3 axes).
-        num_hinge_joints = np.count_nonzero(
-            self.sim.model.jnt_type == self.sim.lib.mjtJoint.mjJNT_HINGE
-        )
-
-        return sum_hinge_torques / num_hinge_joints
+        return sum_hinge_torques / self._num_hinge_joints
 
     def _self_contact_cost(self):
         # Sum of all contact force magnitudes between bodies in the model.
         total_force = 0.0
-        floor_geom_id = self.sim.model.geom_name2id("floor")
 
         for i in range(self.sim.data.ncon):
             contact = self.sim.data.contact[i]
@@ -146,7 +170,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
             geom2 = contact.geom[1]
 
             # Skip contacts involving the ground
-            if geom1 == floor_geom_id or geom2 == floor_geom_id:
+            if geom1 == self._floor_geom_id or geom2 == self._floor_geom_id:
                 continue
 
             # Only worry about the normal force which will be the first force in the list
@@ -165,11 +189,21 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return total_force
 
     def get_reward_dict(self, obs_dict):
+        x_pos, _, _ = self._get_com()
+        x_vel, y_vel = self._get_com_velocity()
+
+        gaussian_plateau_y_vel = self._gaussian_plateau_vel(y_vel, self.target_y_vel)
+
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
-                ("y_vel", self._y_vel()),
-                ("gaussian_vel", self._gaussian_plateau_vel()),
+                ("x_drift", self._plateau_pos(x_pos, 0, self._x_drift_plateau)),
+                ("y_vel", y_vel),
+                # don't use target_x_vel as this term is only intended to avoid sideways drift
+                ("gaussian_x_vel", self._gaussian_vel(x_vel, 0)),
+                # provide gaussian_plateau_y_vel for more descriptive label, and gaussian_vel for bw compat
+                ("gaussian_plateau_y_vel", gaussian_plateau_y_vel),
+                ("gaussian_vel", gaussian_plateau_y_vel),
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
