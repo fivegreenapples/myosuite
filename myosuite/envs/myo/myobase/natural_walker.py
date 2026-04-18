@@ -53,6 +53,15 @@ class NaturalAndRobustWalker(WalkEnvV0):
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
         **kwargs,
     ):
+        # pre calculate model weight for grf cost
+        self._model_weight = 9.8 * sum(self.sim.model.body_mass)
+        # pre calculate number of hinge joints for joint_limit cost
+        self._num_hinge_joints = np.count_nonzero(
+            self.sim.model.jnt_type == self.sim.lib.mjtJoint.mjJNT_HINGE
+        )
+        # set floor geom id for self_contact cost
+        self._floor_geom_id = self.sim.model.geom_name2id("floor")
+
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
             **kwargs,
@@ -80,14 +89,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
             self.sim.data.sensor("l_foot").data[0]
             + self.sim.data.sensor("l_toes").data[0]
         )
-        weight = 9.8 * sum(self.sim.model.body_mass)
         # The feet and toe sensors are <touch> sensors which return a single scalar value
         # for surface forces acting through the touch "site" along a normal to the
         # contacting surface. At least I think that's what they do.
         # Either way, the values are in Newtons. We normalized this against the weight
         # so the normalized_grf is in units of body weight "BW" (this mirrors how Scone
         # returns contact_load)
-        normalized_grf = (r_grf + l_grf) / weight
+        normalized_grf = (r_grf + l_grf) / self._model_weight
         # and then return this value clipped below 1.2 - a magic number from the original
         # paper which serves to avoid any penalty for grfs which would occur in normal
         # walking.
@@ -140,16 +148,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # joints. Which, I think in MuJoCo land means divide by the number of hinge
         # joints as each hinge in MuJoCo only has one axis (in Scone it looks like a
         # single joint incorporates all 3 axes).
-        num_hinge_joints = np.count_nonzero(
-            self.sim.model.jnt_type == self.sim.lib.mjtJoint.mjJNT_HINGE
-        )
-
-        return sum_hinge_torques / num_hinge_joints
+        return sum_hinge_torques / self._num_hinge_joints
 
     def _self_contact_cost(self):
         # Sum of all contact force magnitudes between bodies in the model.
         total_force = 0.0
-        floor_geom_id = self.sim.model.geom_name2id("floor")
 
         for i in range(self.sim.data.ncon):
             contact = self.sim.data.contact[i]
@@ -157,7 +160,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
             geom2 = contact.geom[1]
 
             # Skip contacts involving the ground
-            if geom1 == floor_geom_id or geom2 == floor_geom_id:
+            if geom1 == self._floor_geom_id or geom2 == self._floor_geom_id:
                 continue
 
             # Only worry about the normal force which will be the first force in the list
