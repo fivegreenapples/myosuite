@@ -14,7 +14,6 @@ https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
 
 import collections
 
-import mujoco
 import numpy as np
 
 from .walk_v0 import WalkEnvV0
@@ -61,6 +60,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
         x_drift_plateau: float = 0.0,
+        curriculum=None,
         **kwargs,
     ):
         # pre calculate model weight for grf cost
@@ -74,6 +74,8 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         # used for x_drift cost term
         self._x_drift_plateau = x_drift_plateau
+        # used to define a y_vel and y_pos curriculum
+        self._curriculum = curriculum
 
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
@@ -257,3 +259,30 @@ class NaturalAndRobustWalker(WalkEnvV0):
             axis=0,
         )
         return rwd_dict
+
+    # Override get_obs_dict to insert vals for target y velocity if a curriculum is set
+    def get_obs_dict(self, sim):
+        obs_dict = super().get_obs_dict(sim)
+        if not self._curriculum:
+            # preserve compatability with use of this environment when no curriculum is set
+            return obs_dict
+
+        new_obs = {}
+        for k in obs_dict:
+            if k == "act":
+                # Insert target velocity observations before "act"
+                # "act" must stay at end of dict to satisfy expectations of the custom
+                # replay buffer AdaptiveEnergyBuffer used in depRL.
+                #
+                # We supply the target and difference from target. Possibly these are
+                # redundant but perhaps this makes it easier for the learning process.
+                _, y_vel = self._get_com_velocity().copy()
+                new_obs["target_vel"] = np.array(
+                    [
+                        self.target_y_vel,  # the actual target
+                        y_vel - self.target_y_vel,  # difference from target
+                    ]
+                )
+            new_obs[k] = obs_dict[k]
+
+        return new_obs
