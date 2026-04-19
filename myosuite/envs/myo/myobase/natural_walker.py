@@ -80,11 +80,6 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # used for diagnostics when testing
         self._print_debug = print_debug
 
-        super()._setup(
-            weighted_reward_keys=weighted_reward_keys,
-            **kwargs,
-        )
-
         # Calculate y_vel curriculum ahead of time
         # Default to incoming target velocity
 
@@ -208,6 +203,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 f"Target y vel: {self.target_y_vel:.2f} m/s"
                 f" ({self.target_y_vel*3.6:.1f} kph)"
             )
+
+        super()._setup(
+            weighted_reward_keys=weighted_reward_keys,
+            **kwargs,
+        )
 
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
