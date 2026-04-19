@@ -54,6 +54,8 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # linear reward up to the target velocity and 1 thereafter.
         # simpler version of above. just simpler without the smooth gradients of a gaussian
         "plateau_y_vel": 0,
+        # Add penalty for finishing early
+        "done": 0,
     }
 
     def _setup(
