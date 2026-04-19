@@ -192,7 +192,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self._y_pos_curriculum = [0] * MAX_STEPS
         for idx in range(1, len(self._y_pos_curriculum)):
             prev_dist = self._y_pos_curriculum[idx - 1]
-            vel_for_step = self.y_vel_curriculum[idx - 1]
+            vel_for_step = self._y_vel_curriculum[idx - 1]
             self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
 
         # Initialise targets from curriculums.
