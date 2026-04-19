@@ -164,7 +164,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 v_max = self._curriculum["v_max"]
                 v_inc = self._curriculum["v_inc"]
                 v_range = v_max - v_min
-                num_intervals = v_range // v_inc
+                num_intervals = int(v_range // v_inc)
                 final_inc = v_max - (v_min + (v_inc * num_intervals))
                 if final_inc > 0.05:
                     num_intervals += 1
