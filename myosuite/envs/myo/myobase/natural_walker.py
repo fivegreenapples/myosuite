@@ -121,6 +121,10 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     new_target = v_min + (np.random.random() * v_range)
                     self._y_vel_curriculum.extend([new_target] * v_steps)
 
+                if len(self._y_vel_curriculum) > MAX_STEPS:
+                    extra = len(self._y_vel_curriculum) - MAX_STEPS
+                    del self._y_vel_curriculum[-extra:]
+
             elif self._curriculum["type"] == "ramp":
                 # for ramp curriculum expect dict of form
                 # {
