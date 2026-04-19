@@ -61,7 +61,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         "gaussian_x_vel": 0,
         # x_drift is a cost term to penalise moving away from the running centerline
         "x_drift": 0,
-        # rewards being at the target y position which is based on target velociyy and number of steps covered.
+        # rewards being at the target y position which is based on target velocity and number of steps covered.
         # aims to ensure speed is maintained rather than slowly slipping being
         "gaussian_y_pos": 0,
         # like gaussian_plateau_y_vel but stretches the gaussian so the gradient is not flat at v==0 when target is high (e.g. > 2.5)
@@ -457,10 +457,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
                         y_vel - self.target_y_vel,  # difference from target
                     ]
                 )
-                # Also supply the difference from target y position
-                _, y_pos, _ = self._get_com()
+                # Also supply the difference from target x and y position
+                x_pos, y_pos, _ = self._get_com()
                 new_obs["target_pos"] = np.array(
                     [
+                        x_pos - 0,  # difference from centerline
                         y_pos - self.target_y_pos,  # difference from target
                     ]
                 )
