@@ -14,7 +14,6 @@ https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
 
 import collections
 
-import mujoco
 import numpy as np
 
 from .walk_v0 import WalkEnvV0
@@ -60,7 +59,10 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def _setup(
         self,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
+        target_y_vel=1.2,
         x_drift_plateau: float = 0.0,
+        curriculum=None,
+        print_debug=False,
         **kwargs,
     ):
         # pre calculate model weight for grf cost
@@ -74,14 +76,170 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         # used for x_drift cost term
         self._x_drift_plateau = x_drift_plateau
+        # used to define a y_vel and y_pos curriculum
+        self._curriculum = curriculum
+        # used for diagnostics when testing
+        self._print_debug = print_debug
+
+        # Calculate y_vel curriculum ahead of time
+        # Default to incoming target velocity
+
+        # MAX_STEPS is defined when registering the env. Not possible to override this via
+        # constructor, and if we want to change seems to require different registrations.
+        # Also seems impossible to get the max_episodes_steps from inside the environment
+        # owing to how the env is wrapped. So we re-define it here for simplicity.
+        MAX_STEPS = 1000
+
+        self._y_vel_curriculum = []
+        if self._curriculum:
+            # expect a dict with at least a "type" key
+            if not isinstance(self._curriculum, dict) or "type" not in self._curriculum:
+                raise ValueError("Curriculum must be a dict with a key of 'type' key")
+
+            if self._curriculum["type"] == "random":
+                # for random curriculum expect dict of form
+                # {
+                #     "v_steps": int, .......... how many steps to stay at a particular speed
+                #     "v_min": float, .......... minimum velocity to target
+                #     "v_max": float, .......... maximum velocity to target
+                # }
+                # curriculum chooses a new random speed between v_min and v_max every v_steps.
+                if (
+                    "v_steps" not in self._curriculum
+                    or "v_min" not in self._curriculum
+                    or "v_max" not in self._curriculum
+                ):
+                    raise ValueError(
+                        "Random curriculum must have 'v_steps', 'v_min' and 'v_max'"
+                    )
+
+                v_steps = self._curriculum["v_steps"]
+                v_min = self._curriculum["v_min"]
+                v_range = self._curriculum["v_max"] - v_min
+
+                for _ in range(0, MAX_STEPS, v_steps):
+                    new_target = v_min + (np.random.random() * v_range)
+                    self._y_vel_curriculum.extend([new_target] * v_steps)
+
+                if len(self._y_vel_curriculum) > MAX_STEPS:
+                    extra = len(self._y_vel_curriculum) - MAX_STEPS
+                    del self._y_vel_curriculum[-extra:]
+
+            elif self._curriculum["type"] == "ramp":
+                # for ramp curriculum expect dict of form
+                # {
+                #     "v_min": float, .......... minimum velocity to target
+                #     "v_max": float, .......... maximum velocity to target
+                # }
+                # curriculum gradually increases speed from v_min to v_max with same
+                # delta across all steps
+                if "v_min" not in self._curriculum or "v_max" not in self._curriculum:
+                    raise ValueError("Ramp curriculum must have 'v_min' and 'v_max'")
+
+                v_min = self._curriculum["v_min"]
+                v_inc = (self._curriculum["v_max"] - v_min) / (MAX_STEPS - 1)
+
+                for idx in range(MAX_STEPS):
+                    self._y_vel_curriculum.append(v_min + (idx * v_inc))
+
+            elif self._curriculum["type"] == "stair":
+                # for stair curriculum expect dict of form
+                # {
+                #     "v_min": float, .......... minimum velocity to target
+                #     "v_max": float, .......... maximum velocity to target
+                #     "v_inc": float, .......... v increase between steps
+                # }
+                # curriculum gradually increases speed from v_min to v_max with v_inc
+                # as target increase between steps
+                if (
+                    "v_min" not in self._curriculum
+                    or "v_max" not in self._curriculum
+                    or "v_inc" not in self._curriculum
+                ):
+                    raise ValueError(
+                        "Stair curriculum must have 'v_min', 'v_max' and 'v_inc'"
+                    )
+
+                v_min = self._curriculum["v_min"]
+                v_max = self._curriculum["v_max"]
+                v_inc = self._curriculum["v_inc"]
+                v_range = v_max - v_min
+                num_intervals = int(v_range // v_inc)
+                final_inc = v_max - (v_min + (v_inc * num_intervals))
+                if final_inc > 0.05:
+                    num_intervals += 1
+
+                num_stages = num_intervals + 1
+                v_steps = MAX_STEPS // num_stages
+
+                if v_steps < 1:
+                    # v_inc is too small to have 1 or more steps per stage
+                    raise ValueError(
+                        "stair curriculum increase too small for number of steps"
+                    )
+
+                v_delta = 0
+                remaining_steps = MAX_STEPS
+                while remaining_steps > 0:
+                    stage_steps = min(v_steps, remaining_steps)
+                    remaining_steps -= stage_steps
+
+                    target = min(v_max, v_min + v_delta)
+                    v_delta += v_inc
+
+                    self._y_vel_curriculum.extend([target] * stage_steps)
+            else:
+                raise ValueError(
+                    f"Unhandled curriculum type: '{self._curriculum['type']}'"
+                )
+        else:
+            self._y_vel_curriculum = [target_y_vel] * MAX_STEPS
+
+        assert len(self._y_vel_curriculum) == MAX_STEPS
+
+        # And now generate y_pos curriculum based on velocity curriculum
+        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
+        # timestep = 0.001s - from XML
+        # dt = 0.01s (time per step)
+        SECONDS_PER_STEP = 0.01
+
+        self._y_pos_curriculum = [0] * MAX_STEPS
+        for idx in range(1, len(self._y_pos_curriculum)):
+            prev_dist = self._y_pos_curriculum[idx - 1]
+            vel_for_step = self._y_vel_curriculum[idx - 1]
+            self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
+
+        # Initialise targets from curriculums.
+        self.target_y_vel = self._y_vel_curriculum[0]
+        self.target_y_pos = self._y_pos_curriculum[0]
+
+        if self._print_debug:
+            print(
+                f"Target y vel: {self.target_y_vel:.2f} m/s"
+                f" ({self.target_y_vel*3.6:.1f} kph)"
+            )
 
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
+            target_y_vel=self.target_y_vel,
             **kwargs,
         )
 
     def step(self, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
+
+        # Update target_y_vel with val from curriculum (the _y_vel_curriculum list is
+        # also created for standard constant target velocity for simplicity)
+        _prev_vel = self.target_y_vel
+        self.target_y_vel = self._y_vel_curriculum[self.steps]
+        self.target_y_pos = self._y_pos_curriculum[self.steps]
+
+        if self._print_debug and _prev_vel != self.target_y_vel:
+            print(
+                f"New target y vel: {self.target_y_vel:.2f} m/s"
+                f" ({self.target_y_vel*3.6:.1f} kph)"
+            )
+
         return super().step(*args, **kwargs)
 
     def _plateau_pos(self, p, target, allowance):
@@ -217,19 +375,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
         x_pos, y_pos, _ = self._get_com()
         x_vel, y_vel = self._get_com_velocity()
 
-        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
-        # timestep = 0.001s - from XML
-        # dt = 0.01s (time per step)
-        SECONDS_PER_STEP = 0.01
-        target_y_pos = self.target_y_vel * self.steps * SECONDS_PER_STEP
-
         gaussian_plateau_y_vel = self._gaussian_plateau_vel(y_vel, self.target_y_vel)
 
         rwd_dict = collections.OrderedDict(
             (
                 # Optional Keys
                 ("x_drift", self._plateau_pos(x_pos, 0, self._x_drift_plateau)),
-                ("gaussian_y_pos", self._gaussian_pos(y_pos, target_y_pos, 5)),
+                ("gaussian_y_pos", self._gaussian_pos(y_pos, self.target_y_pos, 5)),
                 ("y_vel", y_vel),
                 ("plateau_y_vel", self._plateau_vel(y_vel, self.target_y_vel)),
                 # don't use target_x_vel as this term is only intended to avoid sideways drift
@@ -257,3 +409,37 @@ class NaturalAndRobustWalker(WalkEnvV0):
             axis=0,
         )
         return rwd_dict
+
+    # Override get_obs_dict to insert vals for target y velocity if a curriculum is set
+    def get_obs_dict(self, sim):
+        obs_dict = super().get_obs_dict(sim)
+        if not self._curriculum:
+            # preserve compatability with use of this environment when no curriculum is set
+            return obs_dict
+
+        new_obs = {}
+        for k in obs_dict:
+            if k == "act":
+                # Insert target velocity observations before "act"
+                # "act" must stay at end of dict to satisfy expectations of the custom
+                # replay buffer AdaptiveEnergyBuffer used in depRL.
+                #
+                # We supply the target and difference from target. Possibly these are
+                # redundant but perhaps this makes it easier for the learning process.
+                _, y_vel = self._get_com_velocity().copy()
+                new_obs["target_vel"] = np.array(
+                    [
+                        self.target_y_vel,  # the actual target
+                        y_vel - self.target_y_vel,  # difference from target
+                    ]
+                )
+                # Also supply the difference from target y position
+                _, y_pos, _ = self._get_com()
+                new_obs["target_pos"] = np.array(
+                    [
+                        y_pos - self.target_y_pos,  # difference from target
+                    ]
+                )
+            new_obs[k] = obs_dict[k]
+
+        return new_obs
