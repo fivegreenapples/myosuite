@@ -133,6 +133,8 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 # }
                 # curriculum gradually increases speed from v_min to v_max with same
                 # delta across all steps
+                if "v_min" not in self._curriculum or "v_max" not in self._curriculum:
+                    raise ValueError("Ramp curriculum must have 'v_min' and 'v_max'")
 
                 v_min = self._curriculum["v_min"]
                 v_inc = (self._curriculum["v_max"] - v_min) / (MAX_STEPS - 1)
@@ -149,6 +151,14 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 # }
                 # curriculum gradually increases speed from v_min to v_max with v_inc
                 # as target increase between steps
+                if (
+                    "v_min" not in self._curriculum
+                    or "v_max" not in self._curriculum
+                    or "v_inc" not in self._curriculum
+                ):
+                    raise ValueError(
+                        "Stair curriculum must have 'v_min', 'v_max' and 'v_inc'"
+                    )
 
                 v_min = self._curriculum["v_min"]
                 v_max = self._curriculum["v_max"]
