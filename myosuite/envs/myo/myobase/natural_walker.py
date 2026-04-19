@@ -20,6 +20,22 @@ from .walk_v0 import WalkEnvV0
 
 
 class NaturalAndRobustWalker(WalkEnvV0):
+    DEFAULT_OBS_KEYS = [
+        "qpos_without_xy",
+        "qvel",
+        "com_vel",
+        "torso_angle",
+        "feet_heights",
+        "height",
+        "feet_rel_positions",
+        "phase_var",
+        "muscle_length",
+        "muscle_velocity",
+        "muscle_force",
+        "target_vel",
+        "target_pos",
+    ]
+
     DEFAULT_RWD_KEYS_AND_WEIGHTS = {
         # These weights are taken from the sconegym implementation.
         # All but gaussian_vel are mentioned in the paper and do indeed match sconegym.
@@ -60,11 +76,13 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
     def _setup(
         self,
+        obs_keys: list = DEFAULT_OBS_KEYS,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
         target_y_vel=1.2,
         x_drift_plateau: float = 0.0,
         curriculum=None,
         print_debug=False,
+        original_obs_keys=False,
         **kwargs,
     ):
         # pre calculate model weight for grf cost
@@ -82,6 +100,12 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self._curriculum = curriculum
         # used for diagnostics when testing
         self._print_debug = print_debug
+
+        # For bw compatibility allow environments to specify to use the obs_keys from
+        # original base class. without this runs pick up the new obs_keys which include
+        # target vel and pos observations.
+        if original_obs_keys:
+            obs_keys = WalkEnvV0.DEFAULT_OBS_KEYS
 
         # Calculate y_vel curriculum ahead of time
         # Default to incoming target velocity
@@ -222,6 +246,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
             )
 
         super()._setup(
+            obs_keys=obs_keys,
             weighted_reward_keys=weighted_reward_keys,
             target_y_vel=self.target_y_vel,
             **kwargs,
@@ -415,9 +440,6 @@ class NaturalAndRobustWalker(WalkEnvV0):
     # Override get_obs_dict to insert vals for target y velocity if a curriculum is set
     def get_obs_dict(self, sim):
         obs_dict = super().get_obs_dict(sim)
-        if not self._curriculum:
-            # preserve compatability with use of this environment when no curriculum is set
-            return obs_dict
 
         new_obs = {}
         for k in obs_dict:
