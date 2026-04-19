@@ -59,6 +59,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
     def _setup(
         self,
         weighted_reward_keys: dict = DEFAULT_RWD_KEYS_AND_WEIGHTS,
+        target_y_vel=1.2,
         x_drift_plateau: float = 0.0,
         curriculum=None,
         print_debug=False,
@@ -178,7 +179,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     f"Unhandled curriculum type: '{self._curriculum['type']}'"
                 )
         else:
-            self._y_vel_curriculum = [self.target_y_vel] * MAX_STEPS
+            self._y_vel_curriculum = [target_y_vel] * MAX_STEPS
 
         assert len(self._y_vel_curriculum) == MAX_STEPS
 
@@ -195,8 +196,8 @@ class NaturalAndRobustWalker(WalkEnvV0):
             self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
 
         # Initialise targets from curriculums.
-        self.target_y_vel = self._y_vel_curriculum[idx]
-        self.target_y_pos = self._y_pos_curriculum[idx]
+        self.target_y_vel = self._y_vel_curriculum[0]
+        self.target_y_pos = self._y_pos_curriculum[0]
 
         if self._print_debug:
             print(
@@ -206,6 +207,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         super()._setup(
             weighted_reward_keys=weighted_reward_keys,
+            target_y_vel=self.target_y_vel,
             **kwargs,
         )
 
