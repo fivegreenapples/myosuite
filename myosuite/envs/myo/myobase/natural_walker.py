@@ -13,6 +13,7 @@ https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
 """
 
 import collections
+import uuid
 
 import numpy as np
 
@@ -74,6 +75,12 @@ class NaturalAndRobustWalker(WalkEnvV0):
         "done": 0,
     }
 
+    # MAX_STEPS is defined when registering the env. Not possible to override this via
+    # constructor, and if we want to change seems to require different registrations.
+    # Also seems impossible to get the max_episodes_steps from inside the environment
+    # owing to how the env is wrapped. So we re-define it here for simplicity.
+    MAX_STEPS = 1000
+
     def _setup(
         self,
         obs_keys: list = DEFAULT_OBS_KEYS,
@@ -85,6 +92,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
         original_obs_keys=False,
         **kwargs,
     ):
+        self._env_id = uuid.uuid4()
+
+        self._reward = 0
+        self._reward_avg = 0
+
         # pre calculate model weight for grf cost
         self._model_weight = 9.8 * sum(self.sim.model.body_mass)
         # pre calculate number of hinge joints for joint_limit cost
@@ -109,12 +121,6 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         # Calculate y_vel curriculum ahead of time
         # Default to incoming target velocity
-
-        # MAX_STEPS is defined when registering the env. Not possible to override this via
-        # constructor, and if we want to change seems to require different registrations.
-        # Also seems impossible to get the max_episodes_steps from inside the environment
-        # owing to how the env is wrapped. So we re-define it here for simplicity.
-        MAX_STEPS = 1000
 
         self._y_vel_curriculum = []
         if self._curriculum:
@@ -143,12 +149,14 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 v_min = self._curriculum["v_min"]
                 v_range = self._curriculum["v_max"] - v_min
 
-                for _ in range(0, MAX_STEPS, v_steps):
+                for _ in range(0, NaturalAndRobustWalker.MAX_STEPS, v_steps):
                     new_target = v_min + (np.random.random() * v_range)
                     self._y_vel_curriculum.extend([new_target] * v_steps)
 
-                if len(self._y_vel_curriculum) > MAX_STEPS:
-                    extra = len(self._y_vel_curriculum) - MAX_STEPS
+                if len(self._y_vel_curriculum) > NaturalAndRobustWalker.MAX_STEPS:
+                    extra = (
+                        len(self._y_vel_curriculum) - NaturalAndRobustWalker.MAX_STEPS
+                    )
                     del self._y_vel_curriculum[-extra:]
 
             elif self._curriculum["type"] == "ramp":
@@ -163,9 +171,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     raise ValueError("Ramp curriculum must have 'v_min' and 'v_max'")
 
                 v_min = self._curriculum["v_min"]
-                v_inc = (self._curriculum["v_max"] - v_min) / (MAX_STEPS - 1)
+                v_inc = (self._curriculum["v_max"] - v_min) / (
+                    NaturalAndRobustWalker.MAX_STEPS - 1
+                )
 
-                for idx in range(MAX_STEPS):
+                for idx in range(NaturalAndRobustWalker.MAX_STEPS):
                     self._y_vel_curriculum.append(v_min + (idx * v_inc))
 
             elif self._curriculum["type"] == "stair":
@@ -196,7 +206,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     num_intervals += 1
 
                 num_stages = num_intervals + 1
-                v_steps = MAX_STEPS // num_stages
+                v_steps = NaturalAndRobustWalker.MAX_STEPS // num_stages
 
                 if v_steps < 1:
                     # v_inc is too small to have 1 or more steps per stage
@@ -205,7 +215,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     )
 
                 v_delta = 0
-                remaining_steps = MAX_STEPS
+                remaining_steps = NaturalAndRobustWalker.MAX_STEPS
                 while remaining_steps > 0:
                     stage_steps = min(v_steps, remaining_steps)
                     remaining_steps -= stage_steps
@@ -214,26 +224,73 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     v_delta += v_inc
 
                     self._y_vel_curriculum.extend([target] * stage_steps)
+            elif self._curriculum["type"] == "adaptive":
+                # {
+                #     "subtype": str, .......... how to generate the next velocity
+                #     "alpha": float, .......... smoothing param for averaging rewareds
+                #     "threshold": float, ...... level of reward to trigger a velocity change
+                # }
+                # curriculum chooses a new speed at episode reset if the running average
+                # reward is above threshold. choice of speed is determined by subtype.
+                if (
+                    "subtype" not in self._curriculum
+                    or "alpha" not in self._curriculum
+                    or "threshold" not in self._curriculum
+                ):
+                    raise ValueError(
+                        "Adaptive curriculums must have 'subtype', 'alpha' and 'threshold'"
+                    )
+                if self._curriculum["subtype"] == "random":
+                    # for random curriculum expect dict of form
+                    # {
+                    #     "v_min": float, .......... minimum velocity to target
+                    #     "v_max": float, .......... maximum velocity to target
+                    # }
+                    # curriculum changes speed randomly between v_min and v_max
+                    if (
+                        "v_min" not in self._curriculum
+                        or "v_max" not in self._curriculum
+                    ):
+                        raise ValueError(
+                            "Adaptive Random curriculum must have 'v_min', 'v_max'"
+                        )
+
+                elif self._curriculum["subtype"] == "stair":
+                    # for stair curriculum expect dict of form
+                    # {
+                    #     "v_min": float, .......... minimum velocity to target
+                    #     "v_max": float, .......... maximum velocity to target
+                    #     "v_inc": float, .......... v increase between steps
+                    # }
+                    # curriculum increases speed from v_min to v_max with steps of v_inc
+                    if (
+                        "v_min" not in self._curriculum
+                        or "v_max" not in self._curriculum
+                        or "v_inc" not in self._curriculum
+                    ):
+                        raise ValueError(
+                            "Adaptive Stair curriculum must have 'v_min', 'v_max' and 'v_inc'"
+                        )
+                    self._curriculum["v_current_target"] = None
+
+                else:
+                    raise ValueError(
+                        f"Unhandled adaptive curriculum subtype: '{self._curriculum['subtype']}'"
+                    )
+
+                self._generate_adaptive_y_vel_curriculum()
+
             else:
                 raise ValueError(
                     f"Unhandled curriculum type: '{self._curriculum['type']}'"
                 )
         else:
-            self._y_vel_curriculum = [target_y_vel] * MAX_STEPS
+            self._y_vel_curriculum = [target_y_vel] * NaturalAndRobustWalker.MAX_STEPS
 
-        assert len(self._y_vel_curriculum) == MAX_STEPS
+        assert len(self._y_vel_curriculum) == NaturalAndRobustWalker.MAX_STEPS
 
-        # And now generate y_pos curriculum based on velocity curriculum
-        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
-        # timestep = 0.001s - from XML
-        # dt = 0.01s (time per step)
-        SECONDS_PER_STEP = 0.01
-
-        self._y_pos_curriculum = [0] * MAX_STEPS
-        for idx in range(1, len(self._y_pos_curriculum)):
-            prev_dist = self._y_pos_curriculum[idx - 1]
-            vel_for_step = self._y_vel_curriculum[idx - 1]
-            self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
+        # Genrate the position curriculum for y_pos based rewards and observations
+        self._generate_y_pos_curriculum()
 
         # Initialise targets from curriculums.
         self.target_y_vel = self._y_vel_curriculum[0]
@@ -241,7 +298,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
 
         if self._print_debug:
             print(
-                f"Target y vel: {self.target_y_vel:.2f} m/s"
+                f"{self._env_id} Target y vel: {self.target_y_vel:.2f} m/s"
                 f" ({self.target_y_vel*3.6:.1f} kph)"
             )
 
@@ -252,22 +309,79 @@ class NaturalAndRobustWalker(WalkEnvV0):
             **kwargs,
         )
 
-    def step(self, *args, **kwargs):
+    def _generate_adaptive_y_vel_curriculum(self):
+        if self._curriculum["subtype"] == "random":
+            target = self._curriculum["v_min"] + (
+                np.random.random()
+                * (self._curriculum["v_max"] - self._curriculum["v_min"])
+            )
+        elif self._curriculum["subtype"] == "stair":
+            if self._curriculum["v_current_target"] is None:
+                self._curriculum["v_current_target"] = self._curriculum["v_min"]
+            else:
+                self._curriculum["v_current_target"] += self._curriculum["v_inc"]
+            target = min(
+                self._curriculum["v_max"], self._curriculum["v_current_target"]
+            )
+        else:
+            assert False
+        self._y_vel_curriculum = [target] * NaturalAndRobustWalker.MAX_STEPS
+
+    def _generate_y_pos_curriculum(self):
+        # Generate y_pos curriculum based on velocity curriculum
+        # frame_skip == 10 - from BaseV0 (same actions applied for 10 frames during step)
+        # timestep = 0.001s - from XML
+        # dt = 0.01s (time per step)
+        SECONDS_PER_STEP = 0.01
+
+        self._y_pos_curriculum = [0] * len(self._y_vel_curriculum)
+        for idx in range(1, len(self._y_pos_curriculum)):
+            prev_dist = self._y_pos_curriculum[idx - 1]
+            vel_for_step = self._y_vel_curriculum[idx - 1]
+            self._y_pos_curriculum[idx] = prev_dist + (vel_for_step * SECONDS_PER_STEP)
+
+    def reset(self, **kwargs):
+        if self._curriculum and self._curriculum["type"] == "adaptive":
+            self._reward_avg = (
+                self._curriculum["alpha"] * self._reward_avg
+                + (1 - self._curriculum["alpha"]) * self._reward
+            )
+            self._reward = 0
+            if self._reward_avg >= self._curriculum["threshold"]:
+                self._generate_adaptive_y_vel_curriculum()
+                self._generate_y_pos_curriculum()
+                self._reward_avg = 0
+
+        return super().reset(**kwargs)
+
+    def step(self, actions, *args, **kwargs):
         self._prev_ctrl = self.sim.data.ctrl.copy()
+
+        _prev_vel = self.target_y_vel
+
+        # Hack to allow target velocity to be passed in from training loop. This
+        # overrides any internal curriculum velocity we have for this step.
+        if len(actions) == 81:
+            target_y_vel = actions[-1]
+            actions = actions[:-1].copy()
+            if target_y_vel > 0:
+                self._y_vel_curriculum[self.steps] = target_y_vel
+                self._generate_y_pos_curriculum()
 
         # Update target_y_vel with val from curriculum (the _y_vel_curriculum list is
         # also created for standard constant target velocity for simplicity)
-        _prev_vel = self.target_y_vel
         self.target_y_vel = self._y_vel_curriculum[self.steps]
         self.target_y_pos = self._y_pos_curriculum[self.steps]
 
         if self._print_debug and _prev_vel != self.target_y_vel:
             print(
-                f"New target y vel: {self.target_y_vel:.2f} m/s"
+                f"{self._env_id} New target vel: {self.target_y_vel:.2f} m/s"
                 f" ({self.target_y_vel*3.6:.1f} kph)"
             )
 
-        return super().step(*args, **kwargs)
+        results = super().step(actions, *args, **kwargs)
+        self._reward += results[1]
+        return results
 
     def _plateau_pos(self, p, target, allowance):
         # calculates a distance away from target allowing for a "safe zone"
