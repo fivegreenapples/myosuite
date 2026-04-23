@@ -455,7 +455,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return np.mean(np.square(delta_excs))
 
     def _number_muscle_cost(self):
-        return self._get_proportion_active_muscles(self._active_muscles_threshold)
+        threshold = self._active_muscles_threshold
+        if threshold == -1:
+            threshold = 0.15 + (0.3 * ((self.target_y_vel - 1.2) / (3.333 - 1.2)))
+
+        return self._get_proportion_active_muscles(threshold)
 
     def _get_proportion_active_muscles(self, threshold):
         # Gets the proportion of muscles whose activations are above a threshold.
