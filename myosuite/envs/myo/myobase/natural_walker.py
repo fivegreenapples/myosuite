@@ -71,6 +71,9 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # linear reward up to the target velocity and 1 thereafter.
         # simpler version of above. just simpler without the smooth gradients of a gaussian
         "plateau_y_vel": 0,
+        # linear reward up to the target velocity and gausian decline thereafter.
+        # so as above but reduces reward above target to disincentivise going over
+        "lingauss_y_vel": 0,
         # Add penalty for finishing early
         "done": 0,
     }
@@ -398,6 +401,11 @@ class NaturalAndRobustWalker(WalkEnvV0):
         # breadth controls how wide the curve is and hence how severe the drop off either side
         return np.exp(-np.square((p - target) / breadth))
 
+    def _lingauss_vel(self, v, target):
+        if target > 0 and v < target:
+            return v / target
+        return np.exp(-np.square(v - target))
+
     def _plateau_vel(self, v, target):
         if target > 0 and v < target:
             return v / target
@@ -528,6 +536,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 ("gaussian_y_pos", self._gaussian_pos(y_pos, self.target_y_pos, 5)),
                 ("y_vel", y_vel),
                 ("plateau_y_vel", self._plateau_vel(y_vel, self.target_y_vel)),
+                ("lingauss_y_vel", self._lingauss_vel(y_vel, self.target_y_vel)),
                 # don't use target_x_vel as this term is only intended to avoid sideways drift
                 ("gaussian_x_vel", self._gaussian_vel(x_vel, 0)),
                 # provide gaussian_plateau_y_vel for more descriptive label, and gaussian_vel for bw compat
