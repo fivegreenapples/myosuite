@@ -90,6 +90,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         curriculum=None,
         print_debug=False,
         original_obs_keys=False,
+        active_muscles_threshold=0.15,
         **kwargs,
     ):
         self._env_id = uuid.uuid4()
@@ -112,6 +113,9 @@ class NaturalAndRobustWalker(WalkEnvV0):
         self._curriculum = curriculum
         # used for diagnostics when testing
         self._print_debug = print_debug
+        # used to parameterise the cost term for number of active muscles
+        # Default of 0.15 is a number from the paper.
+        self._active_muscles_threshold = active_muscles_threshold
 
         # For bw compatibility allow environments to specify to use the obs_keys from
         # original base class. without this runs pick up the new obs_keys which include
@@ -443,8 +447,7 @@ class NaturalAndRobustWalker(WalkEnvV0):
         return np.mean(np.square(delta_excs))
 
     def _number_muscle_cost(self):
-        # 0.15 is a magic number from the paper.
-        return self._get_proportion_active_muscles(0.15)
+        return self._get_proportion_active_muscles(self._active_muscles_threshold)
 
     def _get_proportion_active_muscles(self, threshold):
         # Gets the proportion of muscles whose activations are above a threshold.
@@ -537,6 +540,18 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 ("grf", self._grf()),
                 ("smooth_exc", self._exc_smooth_cost()),
                 ("number_muscles", self._number_muscle_cost()),
+                (
+                    "number_muscles15",
+                    self._get_proportion_active_muscles(0.15),
+                ),
+                (
+                    "number_muscles30",
+                    self._get_proportion_active_muscles(0.30),
+                ),
+                (
+                    "number_muscles45",
+                    self._get_proportion_active_muscles(0.45),
+                ),
                 ("joint_limit", self._joint_limit_torques()),
                 ("self_contact", self._self_contact_cost()),
                 # Must keys
