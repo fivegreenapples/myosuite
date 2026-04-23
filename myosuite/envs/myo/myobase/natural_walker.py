@@ -166,6 +166,24 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     )
                     del self._y_vel_curriculum[-extra:]
 
+            elif self._curriculum["type"] == "episoderandom":
+                # for episoderandom curriculum expect dict of form
+                # {
+                #     "v_min": float, .......... minimum velocity to target
+                #     "v_max": float, .......... maximum velocity to target
+                # }
+                # curriculum chooses a new random speed between v_min and v_max for whole episode
+                # and at each reset
+                if "v_min" not in self._curriculum or "v_max" not in self._curriculum:
+                    raise ValueError(
+                        "Episoderandom curriculum must have 'v_min' and 'v_max'"
+                    )
+
+                v_min = self._curriculum["v_min"]
+                v_range = self._curriculum["v_max"] - v_min
+                tgt = v_min + (np.random.random() * v_range)
+                self._y_vel_curriculum = [tgt] * NaturalAndRobustWalker.MAX_STEPS
+
             elif self._curriculum["type"] == "ramp":
                 # for ramp curriculum expect dict of form
                 # {
@@ -358,6 +376,12 @@ class NaturalAndRobustWalker(WalkEnvV0):
                 self._generate_adaptive_y_vel_curriculum()
                 self._generate_y_pos_curriculum()
                 self._reward_avg = 0
+        elif self._curriculum and self._curriculum["type"] == "episoderandom":
+            v_min = self._curriculum["v_min"]
+            v_range = self._curriculum["v_max"] - v_min
+            tgt = v_min + (np.random.random() * v_range)
+            self._y_vel_curriculum = [tgt] * NaturalAndRobustWalker.MAX_STEPS
+            self._generate_y_pos_curriculum()
 
         return super().reset(**kwargs)
 
