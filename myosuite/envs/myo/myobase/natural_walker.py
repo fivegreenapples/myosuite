@@ -213,6 +213,48 @@ class NaturalAndRobustWalker(WalkEnvV0):
                     [tgt] * (NaturalAndRobustWalker.MAX_STEPS - 150)
                 )
 
+            elif self._curriculum["type"] == "episodemultirandom":
+                # for episodemultirandom curriculum expect dict of form
+                # {
+                #     "v_min": float, .......... minimum velocity to target
+                #     "v_max": float, .......... maximum velocity to target
+                #     "v_steps": int, .......... number of steps to spend at each speed
+                # }
+                # curriculum chooses a new random speed every v_steps, and computes a ramp up or down between the speeds.
+                # sequence regenerated with new targets at reset.
+                if (
+                    "v_min" not in self._curriculum
+                    or "v_max" not in self._curriculum
+                    or "v_steps" not in self._curriculum
+                ):
+                    raise ValueError(
+                        "Episodemultirandom curriculum must have 'v_min', 'v_max' and 'v_steps'"
+                    )
+
+                v_min = self._curriculum["v_min"]
+                v_range = self._curriculum["v_max"] - v_min
+                v_steps = self._curriculum["v_steps"]
+
+                # like onrampepisoderandom, always start at v_min
+                self._y_vel_curriculum = [v_min] * 50
+                v_current = v_min
+                while len(self._y_vel_curriculum) < NaturalAndRobustWalker.MAX_STEPS:
+                    # choose new target
+                    tgt = v_min + (np.random.random() * v_range)
+                    # ramp to target over 100 steps
+                    v_inc = (tgt - v_current) / 100
+                    for idx in range(1, 101):
+                        self._y_vel_curriculum.append(v_current + (idx * v_inc))
+                    # stay at tgt for v_steps
+                    for idx in range(v_steps):
+                        self._y_vel_curriculum.append(tgt)
+                    v_current = tgt
+
+                # clip curriculum at the intended numbder of steps
+                self._y_vel_curriculum = self._y_vel_curriculum[
+                    : NaturalAndRobustWalker.MAX_STEPS
+                ]
+
             elif self._curriculum["type"] == "ramp":
                 # for ramp curriculum expect dict of form
                 # {
@@ -426,6 +468,31 @@ class NaturalAndRobustWalker(WalkEnvV0):
             self._y_vel_curriculum.extend(
                 [tgt] * (NaturalAndRobustWalker.MAX_STEPS - 150)
             )
+            self._generate_y_pos_curriculum()
+        elif self._curriculum and self._curriculum["type"] == "episodemultirandom":
+            v_min = self._curriculum["v_min"]
+            v_range = self._curriculum["v_max"] - v_min
+            v_steps = self._curriculum["v_steps"]
+
+            # like onrampepisoderandom, always start at v_min
+            self._y_vel_curriculum = [v_min] * 50
+            v_current = v_min
+            while len(self._y_vel_curriculum) < NaturalAndRobustWalker.MAX_STEPS:
+                # choose new target
+                tgt = v_min + (np.random.random() * v_range)
+                # ramp to target over 100 steps
+                v_inc = (tgt - v_current) / 100
+                for idx in range(1, 101):
+                    self._y_vel_curriculum.append(v_current + (idx * v_inc))
+                # stay at tgt for v_steps
+                for idx in range(v_steps):
+                    self._y_vel_curriculum.append(tgt)
+                v_current = tgt
+
+            # clip curriculum at the intended numbder of steps
+            self._y_vel_curriculum = self._y_vel_curriculum[
+                : NaturalAndRobustWalker.MAX_STEPS
+            ]
             self._generate_y_pos_curriculum()
 
         return super().reset(**kwargs)
