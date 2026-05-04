@@ -3,14 +3,14 @@
 Authors  :: Vikash Kumar (vikashplus@gmail.com), Vittorio Caggiano (caggiano@gmail.com)
 ================================================="""
 
-from myosuite.utils import gym
-
-register = gym.register
 import os
 
 import numpy as np
 
 from myosuite.envs.env_variants import register_env_variant
+from myosuite.utils import gym
+
+register = gym.register
 
 
 # utility to register envs with all muscle conditions
@@ -421,6 +421,9 @@ from myosuite.physics.sim_scene import SimBackend
 sim_backend = SimBackend.get_sim_backend()
 
 leg_model = "/../../../simhive/myo_sim/leg/myolegs.xml"
+# myolegs_runway.xml is added in the fork at fivegreenapples/myo_sim.git and the
+# submodule in this repo has been pointed there.
+leg_model_runway = "/../../../simhive/myo_sim/leg/myolegs_runway.xml"
 
 register_env_with_variants(
     id="myoLegStandRandom-v0",
@@ -516,6 +519,24 @@ register_env_with_variants(
         "target_rot": None,  # if None then the initial root pos will be taken, otherwise provide quat
         "terrain": "stairs",
         "variant": "fixed",
+    },
+)
+
+# Natural And Robust Walking  ==============================
+register_env_with_variants(
+    id="myoLegNaturalAndRobustWalk-v0",
+    entry_point="myosuite.envs.myo.myobase.natural_walker:NaturalAndRobustWalker",
+    max_episode_steps=1000,
+    kwargs={
+        "model_path": curr_dir + leg_model_runway,
+        "normalize_act": True,
+        "min_height": 0.8,  # minimum center of mass height before reset
+        "max_rot": 0.8,  # maximum rotation before reset
+        "hip_period": 100,  # desired periodic hip angle movement
+        "reset_type": "init",  # none, init, random
+        "target_x_vel": 0.0,  # desired x velocity in m/s
+        "target_y_vel": 1.2,  # desired y velocity in m/s
+        "target_rot": None,  # if None then the initial root pos will be taken, otherwise provide quat
     },
 )
 
@@ -751,28 +772,33 @@ register_env_with_variants(
 )
 
 # Arm Reaching ==============================
-register_env_with_variants(id='myoArmReachFixed-v0',
-        entry_point='myosuite.envs.myo.myobase.reach_v0:ReachEnvV0',
-        max_episode_steps=150,
-        kwargs={
-            'model_path': curr_dir+'/../assets/arm/myoarm_reach.xml',
-            'target_reach_range': {
-                'forearm_tip': ((-0.2, -0.2, 1.2), (-0.2, -0.2, 1.2)),
-                },
-            'normalize_act': True,
-            'far_th': 1.
-            }
-    )
+register_env_with_variants(
+    id="myoArmReachFixed-v0",
+    entry_point="myosuite.envs.myo.myobase.reach_v0:ReachEnvV0",
+    max_episode_steps=150,
+    kwargs={
+        "model_path": curr_dir + "/../assets/arm/myoarm_reach.xml",
+        "target_reach_range": {
+            "forearm_tip": ((-0.2, -0.2, 1.2), (-0.2, -0.2, 1.2)),
+        },
+        "normalize_act": True,
+        "far_th": 1.0,
+    },
+)
 
-register_env_with_variants(id='myoArmReachRandom-v0',
-        entry_point='myosuite.envs.myo.myobase.reach_v0:ReachEnvV0',
-        max_episode_steps=150,
-        kwargs={
-            'model_path': curr_dir+'/../assets/arm/myoarm_reach.xml',
-            'target_reach_range': {
-                'forearm_tip': ((-0.2-0.15, -0.2-0.15, 1.2-0.15), (-0.2+0.15, -0.2+0.15, 1.2+0.15)),
-                },
-            'normalize_act': True,
-            'far_th': 1.
-            }
-    )
+register_env_with_variants(
+    id="myoArmReachRandom-v0",
+    entry_point="myosuite.envs.myo.myobase.reach_v0:ReachEnvV0",
+    max_episode_steps=150,
+    kwargs={
+        "model_path": curr_dir + "/../assets/arm/myoarm_reach.xml",
+        "target_reach_range": {
+            "forearm_tip": (
+                (-0.2 - 0.15, -0.2 - 0.15, 1.2 - 0.15),
+                (-0.2 + 0.15, -0.2 + 0.15, 1.2 + 0.15),
+            ),
+        },
+        "normalize_act": True,
+        "far_th": 1.0,
+    },
+)
