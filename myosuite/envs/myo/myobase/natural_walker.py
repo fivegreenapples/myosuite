@@ -10,6 +10,9 @@ https://doi.org/10.1016/j.isci.2025.112203
 
 Heavily inspired by the SCONE Gym implementation:
 https://github.com/tgeijten/sconegym/blob/main/sconegym/gaitgym.py
+
+And with many other additions to support new reward terms, velocity conditioned policies
+and velocity curriculums.
 """
 
 import collections
